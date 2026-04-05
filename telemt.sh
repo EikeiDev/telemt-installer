@@ -41,6 +41,9 @@ if [[ "$1" == "ru" ]]; then
     MSG_LOG_TITLE="📝 Настройка логирования (Log Level):"
     MSG_LOG_PROMPT="Выберите уровень (1 - Normal, 2 - Silent, 3 - Debug) [по умолчанию 1]: "
     MSG_DOMAIN_PROMPT="Введите публичный домен или IP для ссылок (пусто - авто IP): "
+    MSG_SECURE_TITLE="🔒 Выберите метод маскировки от DPI:"
+    MSG_SECURE_EE="Fake-TLS (По умолчанию). Маскировка под HTTPS, секрет 'ee'. Обходит 90% блокировок."
+    MSG_SECURE_DD="Secure Padding. Рандомный паддинг, секрет 'dd'. Выбирайте, если провайдер фильтрует Fake-TLS."
     MSG_PROXY_PROTO_PROMPT="Вы планируете прятать прокси за Nginx/HAProxy? (Включить PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
@@ -67,6 +70,9 @@ else
     MSG_LOG_TITLE="📝 Log Level Configuration:"
     MSG_LOG_PROMPT="Choose level (1 - Normal, 2 - Silent, 3 - Debug) [default: 1]: "
     MSG_DOMAIN_PROMPT="Enter public domain or IP for connection links (empty for auto IP): "
+    MSG_SECURE_TITLE="🔒 Select Protection Mode (DPI Bypass):"
+    MSG_SECURE_EE="Fake-TLS (Recommended). Mimics HTTPS, 'ee' secret. Bypasses most DPI."
+    MSG_SECURE_DD="Secure Padding. Uses random byte padding, 'dd' secret. Use if Fake-TLS is blocked."
     MSG_PROXY_PROTO_PROMPT="Will you hide proxy behind Nginx/HAProxy? (Enable PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
@@ -95,7 +101,7 @@ if [[ "$1" == "uninstall" ]]; then
     fi
     # Cleanup Firewall
     if [[ -f "/etc/telemt/telemt.toml" ]]; then
-        PORT_TO_CLEAN=$(awk -F'=' '/^port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ')
+        PORT_TO_CLEAN=$(awk -F'=' '/^[ \t]*port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ' | head -n 1)
         if [[ -n "$PORT_TO_CLEAN" ]]; then
             if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
                 ufw delete allow $PORT_TO_CLEAN/tcp >/dev/null 2>&1
@@ -152,6 +158,18 @@ esac
 echo -e "\n${YELLOW}🌐 Public Address (Domain/IP)${NC}"
 read -p "$MSG_DOMAIN_PROMPT" USER_CUSTOM_DOMAIN
 USER_CUSTOM_DOMAIN=$(echo "$USER_CUSTOM_DOMAIN" | tr -d '[:space:]')
+
+echo -e "\n${YELLOW}$MSG_SECURE_TITLE${NC}"
+echo -e "1. ${GREEN}Fake-TLS${NC} - $MSG_SECURE_EE"
+echo -e "2. ${GREEN}Secure Padding${NC} - $MSG_SECURE_DD"
+read -p "1/2 [1]: " SECURE_MODE_CHOICE
+if [[ "$SECURE_MODE_CHOICE" == "2" ]]; then
+    MODE_TLS="false"
+    MODE_SECURE="true"
+else
+    MODE_TLS="true"
+    MODE_SECURE="false"
+fi
 
 echo -e "\n${YELLOW}🛡️  Web-Server Integration${NC}"
 read -p "$MSG_PROXY_PROTO_PROMPT" USER_PROXY_PROTO
@@ -232,8 +250,8 @@ cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [general.modes]
 classic = false
-secure = false
-tls = true
+secure = $MODE_SECURE
+tls = $MODE_TLS
 
 [server]
 port = $PORT
@@ -414,7 +432,7 @@ case "${1:-status}" in
         else
             CONNECT_HOST=$(curl -s --max-time 3 http://ifconfig.me 2>/dev/null || curl -s --max-time 3 http://ipinfo.io/ip 2>/dev/null || echo "YOUR_SERVER_IP")
         fi
-        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links.tls[0] // "NO TLS LINK FOR THIS USER")\n"' 2>/dev/null | sed -E "s/server=[a-zA-Z0-9\.-]+/server=$CONNECT_HOST/g" || echo "API is not responding. Is telemt running?"
+        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links | to_entries | map("  \(.key | ascii_upcase): \(.value[0])") | join("\n"))\n"' 2>/dev/null | sed -E "s/server=[a-zA-Z0-9\.-]+/server=$CONNECT_HOST/g" || echo "API is not responding. Is telemt running?"
         ;;
     "stats")
         curl -s http://127.0.0.1:9090/metrics 2>/dev/null || echo "Metrics API not ready."
