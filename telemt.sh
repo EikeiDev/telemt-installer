@@ -3,10 +3,6 @@
 # Telemt Installation Script
 # Interactive installer for the Rust-based Telemt project (telemt/telemt)
 # Replaces older MTProxy scripts with a modern implementation.
-#
-# Usage:
-#   ./telemt.sh               - Install Telemt
-#   ./telemt.sh uninstall     - Remove Telemt completely
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,7 +12,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-echo -e "${BLUE}Telemt Installer (Rust Edition)${NC}"
+echo -e "${BLUE}Telemt Installer${NC}"
 echo -e "${CYAN}1${NC} - English"
 echo -e "${CYAN}2${NC} - Русский"
 read -p "Select language / Выберите язык [1/2]: " LANG_CHOICE
@@ -27,7 +23,7 @@ echo "$LANG_SEL" > /etc/telemt/lang
 
 set_messages() {
 if [[ "$1" == "ru" ]]; then
-    MSG_TITLE="Установка Telemt (Rust Proxy)"
+    MSG_TITLE="Установка Telemt"
     MSG_ROOT="Этот установщик должен быть запущен от root (используйте sudo)."
     MSG_UNINSTALL_TITLE="🗑️  Удаление Telemt"
     MSG_UNINSTALL_WARN="ВНИМАНИЕ: Это полностью удалит сервис и конфигурации Telemt!"
@@ -35,20 +31,25 @@ if [[ "$1" == "ru" ]]; then
     MSG_UNINSTALL_CANCEL="Удаление отменено."
     MSG_DEPS="Установка зависимостей (curl, xxd, jq, tar)..."
     MSG_NO_APT="Установите curl, xxd, jq и tar вручную."
-    MSG_DOWNLOADING="Загрузка бинарника Telemt (Rust)..."
+    MSG_DOWNLOADING="Загрузка бинарника Telemt..."
     MSG_PORT_PROMPT="Введите порт прокси (по умолчанию"
     MSG_MODE_TITLE="⚡ Режим работы (Direct vs Relay):"
     MSG_MODE_DIRECT="Прямое подключение к ЦОДам Telegram. Не поддерживает спонсорский канал, но очень стабильно и спасает от банов."
     MSG_MODE_RELAY="Через старые прокси-посредники. Менее стабильно, но ПОДДЕРЖИВАЕТ спонсорский канал (Ad Tag)."
     MSG_MODE_PROMPT="Выберите режим (1 - Direct, 2 - Relay) [по умолчанию 1]: "
     MSG_TAG_PROMPT="Введите ваш Ad Tag от @MTProxybot (оставьте пустым для пропуска): "
+    MSG_LOG_TITLE="📝 Настройка логирования (Log Level):"
+    MSG_LOG_PROMPT="Выберите уровень (1 - Normal, 2 - Silent, 3 - Debug) [по умолчанию 1]: "
+    MSG_DOMAIN_PROMPT="Введите публичный домен или IP для ссылок (пусто - авто IP): "
+    MSG_PROXY_PROTO_PROMPT="Вы планируете прятать прокси за Nginx/HAProxy? (Включить PROXY Protocol) [y/N]: "
+    MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
     MSG_SVC_CREATE="Создание systemd сервиса..."
     MSG_UTIL_CREATE="Создание утилиты управления telemt-ctl..."
     MSG_COMPLETE="🎉 Установка завершена!"
     MSG_QUICK="📋 Быстрые команды:"
 else
-    MSG_TITLE="Telemt Installation (Rust Proxy)"
+    MSG_TITLE="Telemt Installation"
     MSG_ROOT="This installer must be run as root (use sudo)."
     MSG_UNINSTALL_TITLE="🗑️  Telemt Uninstallation"
     MSG_UNINSTALL_WARN="WARNING: This will completely remove Telemt service and configs!"
@@ -56,13 +57,18 @@ else
     MSG_UNINSTALL_CANCEL="Uninstallation cancelled."
     MSG_DEPS="Installing dependencies (curl, xxd, jq, tar)..."
     MSG_NO_APT="Install curl, xxd, jq, and tar manually."
-    MSG_DOWNLOADING="Downloading Telemt binary (Rust)..."
+    MSG_DOWNLOADING="Downloading Telemt binary..."
     MSG_PORT_PROMPT="Enter proxy port (default"
     MSG_MODE_TITLE="⚡ Operation Mode (Direct vs Relay):"
     MSG_MODE_DIRECT="Direct-to-DC. Best stability, no Middle-End proxies. DOES NOT support sponsored ad tag."
     MSG_MODE_RELAY="Middle-End Relay. Slower and easily blocked, but REQUIRES it for sponsored ad tag."
     MSG_MODE_PROMPT="Choose mode (1- Direct, 2 - Relay) [default: 1]: "
     MSG_TAG_PROMPT="Enter your Ad Tag from @MTProxybot (leave empty to skip): "
+    MSG_LOG_TITLE="📝 Log Level Configuration:"
+    MSG_LOG_PROMPT="Choose level (1 - Normal, 2 - Silent, 3 - Debug) [default: 1]: "
+    MSG_DOMAIN_PROMPT="Enter public domain or IP for connection links (empty for auto IP): "
+    MSG_PROXY_PROTO_PROMPT="Will you hide proxy behind Nginx/HAProxy? (Enable PROXY Protocol) [y/N]: "
+    MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
     MSG_SVC_CREATE="Creating systemd service..."
     MSG_UTIL_CREATE="Creating management utility telemt-ctl..."
@@ -86,6 +92,18 @@ if [[ "$1" == "uninstall" ]]; then
     if [[ "$CONFIRM" != "YES" ]]; then
         echo -e "${GREEN}$MSG_UNINSTALL_CANCEL${NC}"
         exit 0
+    fi
+    # Cleanup Firewall
+    if [[ -f "/etc/telemt/telemt.toml" ]]; then
+        PORT_TO_CLEAN=$(awk -F'=' '/^port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ')
+        if [[ -n "$PORT_TO_CLEAN" ]]; then
+            if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+                ufw delete allow $PORT_TO_CLEAN/tcp >/dev/null 2>&1
+            elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+                firewall-cmd --remove-port=$PORT_TO_CLEAN/tcp --permanent >/dev/null 2>&1
+                firewall-cmd --reload >/dev/null 2>&1
+            fi
+        fi
     fi
     systemctl stop telemt 2>/dev/null
     systemctl disable telemt 2>/dev/null
@@ -123,6 +141,33 @@ RANDOM_DOMAIN=${TLS_DOMAINS[$RANDOM % ${#TLS_DOMAINS[@]}]}
 read -p "$MSG_TLS_PROMPT: $RANDOM_DOMAIN): " USER_TLS
 TLS_DOMAIN=${USER_TLS:-$RANDOM_DOMAIN}
 
+echo -e "\n${YELLOW}$MSG_LOG_TITLE${NC}"
+read -p "$MSG_LOG_PROMPT" USER_LOG_MODE
+case "$USER_LOG_MODE" in
+    2) LOG_LEVEL="silent" ;;
+    3) LOG_LEVEL="debug" ;;
+    *) LOG_LEVEL="normal" ;;
+esac
+
+echo -e "\n${YELLOW}🌐 Public Address (Domain/IP)${NC}"
+read -p "$MSG_DOMAIN_PROMPT" USER_CUSTOM_DOMAIN
+USER_CUSTOM_DOMAIN=$(echo "$USER_CUSTOM_DOMAIN" | tr -d '[:space:]')
+
+echo -e "\n${YELLOW}🛡️  Web-Server Integration${NC}"
+read -p "$MSG_PROXY_PROTO_PROMPT" USER_PROXY_PROTO
+if [[ "$USER_PROXY_PROTO" =~ ^[Yy]$ ]]; then
+    USE_PROXY_PROTO="true"
+    LISTEN_IP="127.0.0.1"
+else
+    USE_PROXY_PROTO="false"
+    LISTEN_IP="0.0.0.0"
+fi
+
+echo -e "\n${YELLOW}👤 User Settings${NC}"
+read -p "$MSG_USERNAME_PROMPT" USER_NAME_INPUT
+USER_NAME_INPUT=$(echo "$USER_NAME_INPUT" | tr -d '[:space:]')
+PROXY_USERNAME=${USER_NAME_INPUT:-default_user}
+
 echo -e "\n${YELLOW}$MSG_DEPS${NC}"
 if command -v apt >/dev/null 2>&1; then
     apt update -qq
@@ -132,7 +177,12 @@ fi
 CONFIG_DIR="/etc/telemt"
 BIN_FILE="/usr/local/bin/telemt"
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR/tlsfront"
+if [[ -n "$USER_CUSTOM_DOMAIN" ]]; then
+    echo "$USER_CUSTOM_DOMAIN" > "$CONFIG_DIR/custom_domain"
+else
+    rm -f "$CONFIG_DIR/custom_domain"
+fi
 systemctl stop telemt 2>/dev/null
 
 echo -e "\n${YELLOW}$MSG_DOWNLOADING${NC}"
@@ -170,6 +220,7 @@ TELE_PROXY_MODE="false"
 
 cat > "$CONFIG_DIR/telemt.toml" << EOL
 [general]
+log_level = "$LOG_LEVEL"
 use_middle_proxy = $TELE_PROXY_MODE
 EOL
 
@@ -186,6 +237,7 @@ tls = true
 
 [server]
 port = $PORT
+proxy_protocol = $USE_PROXY_PROTO
 metrics_listen = "127.0.0.1:9090"
 
 [server.api]
@@ -194,15 +246,16 @@ listen = "127.0.0.1:9091"
 whitelist = ["127.0.0.1/32"]
 
 [[server.listeners]]
-ip = "0.0.0.0"
+ip = "$LISTEN_IP"
 
 [censorship]
 tls_domain = "$TLS_DOMAIN"
 mask = true
 tls_emulation = true
+tls_front_dir = "$CONFIG_DIR/tlsfront"
 
 [access.users]
-default_user = "$USER_SECRET"
+$PROXY_USERNAME = "$USER_SECRET"
 EOL
 
 if ! id "telemt" >/dev/null 2>&1; then
@@ -271,6 +324,7 @@ chmod +x /usr/local/bin/telemt-updater
 
 cat > /etc/cron.d/telemt-updater << 'CRON_EOF'
 30 4 */3 * * root /usr/local/bin/telemt-updater
+0 5 * * 0 root /usr/local/bin/telemt-ctl tls-flush >/dev/null 2>&1
 CRON_EOF
 chmod 644 /etc/cron.d/telemt-updater
 
@@ -287,6 +341,12 @@ show_help() {
     echo -e "  \033[0;32mstop\033[0m    - Stop service"
     echo -e "  \033[0;32mrestart\033[0m - Restart service"
     echo -e "  \033[0;32mreload\033[0m  - Reload config (telemt.toml) without downtime"
+    echo -e "  \033[0;32mbackup\033[0m  - Backup proxy config to archive"
+    echo -e "  \033[0;32mrestore\033[0m - Restore config from archive (telemt-ctl restore <file>)"
+    echo -e "  \033[0;32mtls-flush\033[0m- Clear Fake-TLS cache and refresh certificates"
+    echo -e "  \033[0;32muser-add\033[0m- Add a new user (telemt-ctl user-add <name>)"
+    echo -e "  \033[0;32muser-del\033[0m- Delete a user (telemt-ctl user-del <name>)"
+    echo -e "  \033[0;32musers\033[0m   - List all active users"
     echo -e "  \033[0;32mlinks\033[0m   - Fetch active links natively from API"
     echo -e "  \033[0;32mstats\033[0m   - Local prometheus metrics payload"
     echo -e "  \033[0;32mupdate\033[0m  - Trigger binary update manually"
@@ -298,11 +358,63 @@ case "${1:-status}" in
     "stop")    systemctl stop telemt; echo "Stopped" ;;
     "restart") systemctl restart telemt; echo "Restarted" ;;
     "reload")  systemctl reload telemt; echo "Reloaded" ;;
+    "backup")
+        BACKUP_FILE="$PWD/telemt_backup_$(date +%F).tar.gz"
+        tar -czf "$BACKUP_FILE" -C /etc telemt
+        echo -e "\033[0;32m✅ Backup saved to: $BACKUP_FILE\033[0m"
+        ;;
+    "restore")
+        if [[ -z "$2" || ! -f "$2" ]]; then echo "Usage: telemt-ctl restore <archive.tar.gz>"; exit 1; fi
+        systemctl stop telemt
+        rm -rf /etc/telemt
+        tar -xzf "$2" -C /etc
+        chown -R telemt:telemt /etc/telemt
+        systemctl start telemt
+        echo -e "\033[0;32m♻️ Config restored from $2!\033[0m"
+        $0 status
+        ;;
+    "tls-flush")
+        rm -f /etc/telemt/tlsfront/* 2>/dev/null
+        systemctl restart telemt
+        echo -e "\033[0;32m♻️  Fake-TLS Cache flushed successfully!\033[0m"
+        ;;
+    "user-add")
+        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username>"; exit 1; fi
+        NEW_USER="$2"
+        if grep -q "^$NEW_USER =" /etc/telemt/telemt.toml; then
+            echo -e "\033[0;31mUser $NEW_USER already exists!\033[0m"; exit 1
+        fi
+        NEW_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        sed -i "/^\[access.users\]/a $NEW_USER = \"$NEW_SECRET\"" /etc/telemt/telemt.toml
+        systemctl reload telemt
+        echo -e "\033[0;32m✅ User $NEW_USER added!\033[0m"
+        $0 links
+        ;;
+    "user-del")
+        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-del <username>"; exit 1; fi
+        DEL_USER="$2"
+        if ! grep -q "^$DEL_USER =" /etc/telemt/telemt.toml; then
+            echo -e "\033[0;31mUser $DEL_USER not found!\033[0m"; exit 1
+        fi
+        sed -i "/^$DEL_USER ="/d /etc/telemt/telemt.toml
+        systemctl reload telemt
+        echo -e "\033[0;32m🗑️  User $DEL_USER deleted!\033[0m"
+        $0 links
+        ;;
+    "users")
+        echo -e "\033[0;34m=== Active Users ===\033[0m"
+        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "👤 \(.username)"' 2>/dev/null || echo "API not responding"
+        ;;
     "update")  echo "Checking updates..."; /usr/local/bin/telemt-updater; echo "Done." ;;
     "logs")    journalctl -u telemt -f ;;
     "links")
         echo -e "\033[1;33m🔗 Connection Links via REST API:\033[0m"
-        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links.tls[0] // "NO TLS LINK FOR THIS USER")\n"' 2>/dev/null || echo "API is not responding. Is telemt running?"
+        if [[ -f "/etc/telemt/custom_domain" ]]; then
+            CONNECT_HOST=$(cat /etc/telemt/custom_domain)
+        else
+            CONNECT_HOST=$(curl -s --max-time 3 http://ifconfig.me 2>/dev/null || curl -s --max-time 3 http://ipinfo.io/ip 2>/dev/null || echo "YOUR_SERVER_IP")
+        fi
+        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links.tls[0] // "NO TLS LINK FOR THIS USER")\n"' 2>/dev/null | sed -E "s/server=[a-zA-Z0-9\.-]+/server=$CONNECT_HOST/g" || echo "API is not responding. Is telemt running?"
         ;;
     "stats")
         curl -s http://127.0.0.1:9090/metrics 2>/dev/null || echo "Metrics API not ready."
@@ -319,6 +431,26 @@ esac
 CTLEOF
 chmod +x /usr/local/bin/telemt-ctl
 
+# TCP BBR Auto-Tuning
+if ! grep -q "net.ipv4.tcp_congestion_control" /etc/sysctl.conf 2>/dev/null; then
+    echo -e "${YELLOW}Optimizing TCP with BBR...${NC}"
+    echo -e "\n# TCP BBR Tuning for Protocol Proxy" >> /etc/sysctl.conf
+    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_fastopen=3" >> /etc/sysctl.conf
+    sysctl -p >/dev/null 2>&1
+fi
+
+# Firewall Auto-Configuration
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+    echo -e "${YELLOW}Configuring UFW firewall for port $PORT...${NC}"
+    ufw allow $PORT/tcp >/dev/null 2>&1
+elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+    echo -e "${YELLOW}Configuring Firewalld for port $PORT...${NC}"
+    firewall-cmd --add-port=$PORT/tcp --permanent >/dev/null 2>&1
+    firewall-cmd --reload >/dev/null 2>&1
+fi
+
 systemctl daemon-reload
 systemctl enable telemt
 systemctl start telemt
@@ -326,9 +458,34 @@ sleep 2
 
 echo -e "\n${YELLOW}$MSG_COMPLETE${NC}"
 echo -e "${CYAN}$MSG_QUICK${NC}"
-echo -e "${GREEN}telemt-ctl status${NC}"
-echo -e "${GREEN}telemt-ctl links${NC}"
-echo -e "${GREEN}telemt-ctl update${NC}"
-echo -e "${GREEN}telemt.sh uninstall${NC}"
+if [[ "$LANG_SEL" == "ru" ]]; then
+    echo -e "  ${GREEN}telemt-ctl status${NC}   - Статус прокси и ссылки"
+    echo -e "  ${GREEN}telemt-ctl links${NC}    - Показать ссылки (отдельно)"
+    echo -e "  ${GREEN}telemt-ctl users${NC}    - Список пользователей"
+    echo -e "  ${GREEN}telemt-ctl user-add${NC} - Добавить пользователя"
+    echo -e "  ${GREEN}telemt-ctl user-del${NC} - Удалить пользователя"
+    echo -e "  ${GREEN}telemt-ctl reload${NC}   - Перезагрузить конфиг без обрыва"
+    echo -e "  ${GREEN}telemt-ctl restart${NC}  - Полностью перезапустить сервис"
+    echo -e "  ${GREEN}telemt-ctl stats${NC}    - Показать метрики работы"
+    echo -e "  ${GREEN}telemt-ctl update${NC}   - Проверить обновления"
+    echo -e "  ${GREEN}telemt-ctl logs${NC}     - Смотреть логи в реальном времени"
+    echo -e "  ${GREEN}telemt-ctl backup${NC}   - Создать резервную копию конфигурации"
+    echo -e "  ${GREEN}telemt-ctl restore${NC}  - Восстановить конфигурацию из копии"
+    echo -e "  ${GREEN}telemt-ctl tls-flush${NC} - Принудительно обновить кэш Fake-TLS"
+else
+    echo -e "  ${GREEN}telemt-ctl status${NC}   - Show proxy status & links"
+    echo -e "  ${GREEN}telemt-ctl links${NC}    - Show purely connection links"
+    echo -e "  ${GREEN}telemt-ctl users${NC}    - List all active users"
+    echo -e "  ${GREEN}telemt-ctl user-add${NC} - Add a new user"
+    echo -e "  ${GREEN}telemt-ctl user-del${NC} - Delete a user"
+    echo -e "  ${GREEN}telemt-ctl reload${NC}   - Reload config smoothly"
+    echo -e "  ${GREEN}telemt-ctl restart${NC}  - Full service restart"
+    echo -e "  ${GREEN}telemt-ctl stats${NC}    - Show performance metrics"
+    echo -e "  ${GREEN}telemt-ctl update${NC}   - Check for updates"
+    echo -e "  ${GREEN}telemt-ctl logs${NC}     - View live service logs"
+    echo -e "  ${GREEN}telemt-ctl backup${NC}   - Backup proxy configuration"
+    echo -e "  ${GREEN}telemt-ctl restore${NC}  - Restore config from archive"
+    echo -e "  ${GREEN}telemt-ctl tls-flush${NC} - Force refresh Fake-TLS certificates"
+fi
 
 /usr/local/bin/telemt-ctl status
