@@ -38,7 +38,10 @@ if [[ "$1" == "ru" ]]; then
     MSG_MODE_RELAY="Через старые прокси-посредники. Менее стабильно, но ПОДДЕРЖИВАЕТ спонсорский канал (Ad Tag)."
     MSG_MODE_PROMPT="Выберите режим (1 - Direct, 2 - Relay) [по умолчанию 1]: "
     MSG_TAG_PROMPT="Введите ваш Ad Tag от @MTProxybot (оставьте пустым для пропуска): "
+    MSG_LOG_TITLE="📝 Настройка логирования (Log Level):"
+    MSG_LOG_PROMPT="Выберите уровень (1 - Normal, 2 - Silent, 3 - Debug) [по умолчанию 1]: "
     MSG_DOMAIN_PROMPT="Введите публичный домен или IP для ссылок (пусто - авто IP): "
+    MSG_PROXY_PROTO_PROMPT="Вы планируете прятать прокси за Nginx/HAProxy? (Включить PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
     MSG_SVC_CREATE="Создание systemd сервиса..."
@@ -61,7 +64,10 @@ else
     MSG_MODE_RELAY="Middle-End Relay. Slower and easily blocked, but REQUIRES it for sponsored ad tag."
     MSG_MODE_PROMPT="Choose mode (1- Direct, 2 - Relay) [default: 1]: "
     MSG_TAG_PROMPT="Enter your Ad Tag from @MTProxybot (leave empty to skip): "
+    MSG_LOG_TITLE="📝 Log Level Configuration:"
+    MSG_LOG_PROMPT="Choose level (1 - Normal, 2 - Silent, 3 - Debug) [default: 1]: "
     MSG_DOMAIN_PROMPT="Enter public domain or IP for connection links (empty for auto IP): "
+    MSG_PROXY_PROTO_PROMPT="Will you hide proxy behind Nginx/HAProxy? (Enable PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
     MSG_SVC_CREATE="Creating systemd service..."
@@ -123,9 +129,27 @@ RANDOM_DOMAIN=${TLS_DOMAINS[$RANDOM % ${#TLS_DOMAINS[@]}]}
 read -p "$MSG_TLS_PROMPT: $RANDOM_DOMAIN): " USER_TLS
 TLS_DOMAIN=${USER_TLS:-$RANDOM_DOMAIN}
 
+echo -e "\n${YELLOW}$MSG_LOG_TITLE${NC}"
+read -p "$MSG_LOG_PROMPT" USER_LOG_MODE
+case "$USER_LOG_MODE" in
+    2) LOG_LEVEL="silent" ;;
+    3) LOG_LEVEL="debug" ;;
+    *) LOG_LEVEL="normal" ;;
+esac
+
 echo -e "\n${YELLOW}🌐 Public Address (Domain/IP)${NC}"
 read -p "$MSG_DOMAIN_PROMPT" USER_CUSTOM_DOMAIN
 USER_CUSTOM_DOMAIN=$(echo "$USER_CUSTOM_DOMAIN" | tr -d '[:space:]')
+
+echo -e "\n${YELLOW}🛡️  Web-Server Integration${NC}"
+read -p "$MSG_PROXY_PROTO_PROMPT" USER_PROXY_PROTO
+if [[ "$USER_PROXY_PROTO" =~ ^[Yy]$ ]]; then
+    USE_PROXY_PROTO="true"
+    LISTEN_IP="127.0.0.1"
+else
+    USE_PROXY_PROTO="false"
+    LISTEN_IP="0.0.0.0"
+fi
 
 echo -e "\n${YELLOW}👤 User Settings${NC}"
 read -p "$MSG_USERNAME_PROMPT" USER_NAME_INPUT
@@ -184,6 +208,7 @@ TELE_PROXY_MODE="false"
 
 cat > "$CONFIG_DIR/telemt.toml" << EOL
 [general]
+log_level = "$LOG_LEVEL"
 use_middle_proxy = $TELE_PROXY_MODE
 EOL
 
@@ -200,6 +225,7 @@ tls = true
 
 [server]
 port = $PORT
+proxy_protocol = $USE_PROXY_PROTO
 metrics_listen = "127.0.0.1:9090"
 
 [server.api]
@@ -208,7 +234,7 @@ listen = "127.0.0.1:9091"
 whitelist = ["127.0.0.1/32"]
 
 [[server.listeners]]
-ip = "0.0.0.0"
+ip = "$LISTEN_IP"
 
 [censorship]
 tls_domain = "$TLS_DOMAIN"
@@ -301,6 +327,9 @@ show_help() {
     echo -e "  \033[0;32mstop\033[0m    - Stop service"
     echo -e "  \033[0;32mrestart\033[0m - Restart service"
     echo -e "  \033[0;32mreload\033[0m  - Reload config (telemt.toml) without downtime"
+    echo -e "  \033[0;32muser-add\033[0m- Add a new user (telemt-ctl user-add <name>)"
+    echo -e "  \033[0;32muser-del\033[0m- Delete a user (telemt-ctl user-del <name>)"
+    echo -e "  \033[0;32musers\033[0m   - List all active users"
     echo -e "  \033[0;32mlinks\033[0m   - Fetch active links natively from API"
     echo -e "  \033[0;32mstats\033[0m   - Local prometheus metrics payload"
     echo -e "  \033[0;32mupdate\033[0m  - Trigger binary update manually"
@@ -312,6 +341,33 @@ case "${1:-status}" in
     "stop")    systemctl stop telemt; echo "Stopped" ;;
     "restart") systemctl restart telemt; echo "Restarted" ;;
     "reload")  systemctl reload telemt; echo "Reloaded" ;;
+    "user-add")
+        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username>"; exit 1; fi
+        NEW_USER="$2"
+        if grep -q "^$NEW_USER =" /etc/telemt/telemt.toml; then
+            echo -e "\033[0;31mUser $NEW_USER already exists!\033[0m"; exit 1
+        fi
+        NEW_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        sed -i "/^\[access.users\]/a $NEW_USER = \"$NEW_SECRET\"" /etc/telemt/telemt.toml
+        systemctl reload telemt
+        echo -e "\033[0;32m✅ User $NEW_USER added!\033[0m"
+        $0 links
+        ;;
+    "user-del")
+        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-del <username>"; exit 1; fi
+        DEL_USER="$2"
+        if ! grep -q "^$DEL_USER =" /etc/telemt/telemt.toml; then
+            echo -e "\033[0;31mUser $DEL_USER not found!\033[0m"; exit 1
+        fi
+        sed -i "/^$DEL_USER ="/d /etc/telemt/telemt.toml
+        systemctl reload telemt
+        echo -e "\033[0;32m🗑️  User $DEL_USER deleted!\033[0m"
+        $0 links
+        ;;
+    "users")
+        echo -e "\033[0;34m=== Active Users ===\033[0m"
+        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "👤 \(.username)"' 2>/dev/null || echo "API not responding"
+        ;;
     "update")  echo "Checking updates..."; /usr/local/bin/telemt-updater; echo "Done." ;;
     "logs")    journalctl -u telemt -f ;;
     "links")
