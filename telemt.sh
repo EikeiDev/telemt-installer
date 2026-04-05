@@ -93,6 +93,18 @@ if [[ "$1" == "uninstall" ]]; then
         echo -e "${GREEN}$MSG_UNINSTALL_CANCEL${NC}"
         exit 0
     fi
+    # Cleanup Firewall
+    if [[ -f "/etc/telemt/telemt.toml" ]]; then
+        PORT_TO_CLEAN=$(awk -F'=' '/^port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ')
+        if [[ -n "$PORT_TO_CLEAN" ]]; then
+            if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+                ufw delete allow $PORT_TO_CLEAN/tcp >/dev/null 2>&1
+            elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+                firewall-cmd --remove-port=$PORT_TO_CLEAN/tcp --permanent >/dev/null 2>&1
+                firewall-cmd --reload >/dev/null 2>&1
+            fi
+        fi
+    fi
     systemctl stop telemt 2>/dev/null
     systemctl disable telemt 2>/dev/null
     rm -f /etc/systemd/system/telemt.service
@@ -165,7 +177,7 @@ fi
 CONFIG_DIR="/etc/telemt"
 BIN_FILE="/usr/local/bin/telemt"
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR/tlsfront"
 if [[ -n "$USER_CUSTOM_DOMAIN" ]]; then
     echo "$USER_CUSTOM_DOMAIN" > "$CONFIG_DIR/custom_domain"
 else
@@ -240,6 +252,7 @@ ip = "$LISTEN_IP"
 tls_domain = "$TLS_DOMAIN"
 mask = true
 tls_emulation = true
+tls_front_dir = "$CONFIG_DIR/tlsfront"
 
 [access.users]
 $PROXY_USERNAME = "$USER_SECRET"
@@ -327,6 +340,8 @@ show_help() {
     echo -e "  \033[0;32mstop\033[0m    - Stop service"
     echo -e "  \033[0;32mrestart\033[0m - Restart service"
     echo -e "  \033[0;32mreload\033[0m  - Reload config (telemt.toml) without downtime"
+    echo -e "  \033[0;32mbackup\033[0m  - Backup proxy config to archive"
+    echo -e "  \033[0;32mrestore\033[0m - Restore config from archive (telemt-ctl restore <file>)"
     echo -e "  \033[0;32muser-add\033[0m- Add a new user (telemt-ctl user-add <name>)"
     echo -e "  \033[0;32muser-del\033[0m- Delete a user (telemt-ctl user-del <name>)"
     echo -e "  \033[0;32musers\033[0m   - List all active users"
@@ -341,6 +356,21 @@ case "${1:-status}" in
     "stop")    systemctl stop telemt; echo "Stopped" ;;
     "restart") systemctl restart telemt; echo "Restarted" ;;
     "reload")  systemctl reload telemt; echo "Reloaded" ;;
+    "backup")
+        BACKUP_FILE="$PWD/telemt_backup_$(date +%F).tar.gz"
+        tar -czf "$BACKUP_FILE" -C /etc telemt
+        echo -e "\033[0;32m✅ Backup saved to: $BACKUP_FILE\033[0m"
+        ;;
+    "restore")
+        if [[ -z "$2" || ! -f "$2" ]]; then echo "Usage: telemt-ctl restore <archive.tar.gz>"; exit 1; fi
+        systemctl stop telemt
+        rm -rf /etc/telemt
+        tar -xzf "$2" -C /etc
+        chown -R telemt:telemt /etc/telemt
+        systemctl start telemt
+        echo -e "\033[0;32m♻️ Config restored from $2!\033[0m"
+        $0 status
+        ;;
     "user-add")
         if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username>"; exit 1; fi
         NEW_USER="$2"
@@ -394,6 +424,26 @@ esac
 CTLEOF
 chmod +x /usr/local/bin/telemt-ctl
 
+# TCP BBR Auto-Tuning
+if ! grep -q "net.ipv4.tcp_congestion_control" /etc/sysctl.conf 2>/dev/null; then
+    echo -e "${YELLOW}Optimizing TCP with BBR...${NC}"
+    echo -e "\n# TCP BBR Tuning for Protocol Proxy" >> /etc/sysctl.conf
+    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_fastopen=3" >> /etc/sysctl.conf
+    sysctl -p >/dev/null 2>&1
+fi
+
+# Firewall Auto-Configuration
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+    echo -e "${YELLOW}Configuring UFW firewall for port $PORT...${NC}"
+    ufw allow $PORT/tcp >/dev/null 2>&1
+elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+    echo -e "${YELLOW}Configuring Firewalld for port $PORT...${NC}"
+    firewall-cmd --add-port=$PORT/tcp --permanent >/dev/null 2>&1
+    firewall-cmd --reload >/dev/null 2>&1
+fi
+
 systemctl daemon-reload
 systemctl enable telemt
 systemctl start telemt
@@ -412,6 +462,8 @@ if [[ "$LANG_SEL" == "ru" ]]; then
     echo -e "  ${GREEN}telemt-ctl stats${NC}    - Показать метрики работы"
     echo -e "  ${GREEN}telemt-ctl update${NC}   - Проверить обновления"
     echo -e "  ${GREEN}telemt-ctl logs${NC}     - Смотреть логи в реальном времени"
+    echo -e "  ${GREEN}telemt-ctl backup${NC}   - Создать резервную копию конфигурации"
+    echo -e "  ${GREEN}telemt-ctl restore${NC}  - Восстановить конфигурацию из копии"
 else
     echo -e "  ${GREEN}telemt-ctl status${NC}   - Show proxy status & links"
     echo -e "  ${GREEN}telemt-ctl links${NC}    - Show purely connection links"
@@ -423,6 +475,8 @@ else
     echo -e "  ${GREEN}telemt-ctl stats${NC}    - Show performance metrics"
     echo -e "  ${GREEN}telemt-ctl update${NC}   - Check for updates"
     echo -e "  ${GREEN}telemt-ctl logs${NC}     - View live service logs"
+    echo -e "  ${GREEN}telemt-ctl backup${NC}   - Backup proxy configuration"
+    echo -e "  ${GREEN}telemt-ctl restore${NC}  - Restore config from archive"
 fi
 
 /usr/local/bin/telemt-ctl status
