@@ -401,8 +401,28 @@ sleep 2
 
 echo -e "\n${YELLOW}$MSG_COMPLETE${NC}"
 echo -e "${CYAN}$MSG_QUICK${NC}"
-echo -e "${GREEN}telemt-ctl status${NC}"
-echo -e "${GREEN}telemt-ctl links${NC}"
-echo -e "${GREEN}telemt-ctl update${NC}"
+if [[ "$LANG_SEL" == "ru" ]]; then
+    echo -e "  ${GREEN}telemt-ctl status${NC}   - Статус прокси и ссылки"
+    echo -e "  ${GREEN}telemt-ctl links${NC}    - Показать ссылки (отдельно)"
+    echo -e "  ${GREEN}telemt-ctl users${NC}    - Список пользователей"
+    echo -e "  ${GREEN}telemt-ctl user-add${NC} - Добавить пользователя"
+    echo -e "  ${GREEN}telemt-ctl user-del${NC} - Удалить пользователя"
+    echo -e "  ${GREEN}telemt-ctl reload${NC}   - Перезагрузить конфиг без обрыва"
+    echo -e "  ${GREEN}telemt-ctl restart${NC}  - Полностью перезапустить сервис"
+    echo -e "  ${GREEN}telemt-ctl stats${NC}    - Показать метрики работы"
+    echo -e "  ${GREEN}telemt-ctl update${NC}   - Проверить обновления"
+    echo -e "  ${GREEN}telemt-ctl logs${NC}     - Смотреть логи в реальном времени"
+else
+    echo -e "  ${GREEN}telemt-ctl status${NC}   - Show proxy status & links"
+    echo -e "  ${GREEN}telemt-ctl links${NC}    - Show purely connection links"
+    echo -e "  ${GREEN}telemt-ctl users${NC}    - List all active users"
+    echo -e "  ${GREEN}telemt-ctl user-add${NC} - Add a new user"
+    echo -e "  ${GREEN}telemt-ctl user-del${NC} - Delete a user"
+    echo -e "  ${GREEN}telemt-ctl reload${NC}   - Reload config smoothly"
+    echo -e "  ${GREEN}telemt-ctl restart${NC}  - Full service restart"
+    echo -e "  ${GREEN}telemt-ctl stats${NC}    - Show performance metrics"
+    echo -e "  ${GREEN}telemt-ctl update${NC}   - Check for updates"
+    echo -e "  ${GREEN}telemt-ctl logs${NC}     - View live service logs"
+fi
 
 /usr/local/bin/telemt-ctl status
