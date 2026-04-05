@@ -11,6 +11,12 @@ An automated interactive setup script for **Telemt** — a blazing-fast, Rust-ba
 - **Interactive Setup:** Bilingual installer flow supporting both English and Russian.
 - **System Security:** Generates a secure `systemd` daemon running under a restricted user profile with raised file-descriptor bounds (`LimitNOFILE=1048576`).
 
+### 🛡️ Advanced Protection & Acceleration
+- **TCP BBR:** Automatically configures `sysctl` to enable Google's BBR congestion control algorithm, radically increasing connection speed and reducing latency for mobile clients.
+- **Fake-TLS Auto-Healing:** The proxy transparently caches live certificates (in `tlsfront`). A built-in scheduler automatically flushes this cache weekly, grabbing fresh certs and making the proxy virtually invisible to Deep Packet Inspection (DPI).
+- **Auto-Firewall Setup:** The script auto-detects `ufw` or `firewalld` and automatically permits proxy traffic. When uninstalled, it gracefully cleans up its firewall rules.
+- **Nginx Integration (PROXY Protocol):** Easily hide your proxy behind a legitimate web server on port 443 without losing real client IPs!
+
 ### 🔀 Operation Modes
 The installer prompts you to select your preferred traffic routing topology:
 1. **Direct Mode** — Establishes raw connections directly to Telegram Data Centers bypassing middle-ends. Yields maximum speed and DPI stability. *(Note: Unsuppported by sponsored ad channels).*
@@ -21,13 +27,20 @@ The installer prompts you to select your preferred traffic routing topology:
 The setup logic generates `telemt-ctl`, a reliable multi-purpose CLI tool. Rather than parsing raw log text, it natively queries the proxy's active internal REST API (Port `9091`) directly for live serialization.
 
 | Command | Description |
-|---------|-------------|
-| `telemt-ctl status` | Views systemd service health and summarizes active proxy URLs. |
-| `telemt-ctl links` | Fetches active URI schemes dynamically from the proxy's live memory. |
-| `telemt-ctl reload` | Excecutes `config.toml` changes smoothly without terminating active user TCP connections. |
-| `telemt-ctl restart`| Performs a hard systemctl service restart cycle. |
-| `telemt-ctl stats` | Exposes performance metrics via internal Prometheus endpoints. |
-| `telemt-ctl update` | Forces a manual binary check via GitHub APIs to pull newer updates. |
+|---------|----------|
+| `telemt-ctl status` | Check service status and output connection links. |
+| `telemt-ctl links` | Display current proxy connection links natively. |
+| `telemt-ctl users` | List all active users currently configured. |
+| `telemt-ctl user-add <name>`| Instantly add a new user and generate a connection link. |
+| `telemt-ctl user-del <name>`| Delete user access dynamically exactly when needed. |
+| `telemt-ctl backup` | Fully backup proxy's configuration to a secure archive. |
+| `telemt-ctl restore <file>`| Perfectly restore configuration from a backup archive. |
+| `telemt-ctl tls-flush` | Force-refresh the Fake-TLS certificate cache. |
+| `telemt-ctl reload` | Reload `config.toml` smoothly without dropping active users. |
+| `telemt-ctl restart`| Fully restart the systemd service. |
+| `telemt-ctl stats` | Output local transmission metrics. |
+| `telemt-ctl update` | Manually check GitHub for binary updates. |
+| `telemt-ctl logs` | Watch the live service event logs. |
 
 ## Deployment
 
