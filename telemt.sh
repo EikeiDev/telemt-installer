@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-echo -e "${BLUE}Telemt Installer (Rust Edition)${NC}"
+echo -e "${BLUE}Telemt Installer${NC}"
 echo -e "${CYAN}1${NC} - English"
 echo -e "${CYAN}2${NC} - Русский"
 read -p "Select language / Выберите язык [1/2]: " LANG_CHOICE
@@ -23,7 +23,7 @@ echo "$LANG_SEL" > /etc/telemt/lang
 
 set_messages() {
 if [[ "$1" == "ru" ]]; then
-    MSG_TITLE="Установка Telemt (Rust Proxy)"
+    MSG_TITLE="Установка Telemt"
     MSG_ROOT="Этот установщик должен быть запущен от root (используйте sudo)."
     MSG_UNINSTALL_TITLE="🗑️  Удаление Telemt"
     MSG_UNINSTALL_WARN="ВНИМАНИЕ: Это полностью удалит сервис и конфигурации Telemt!"
@@ -31,7 +31,7 @@ if [[ "$1" == "ru" ]]; then
     MSG_UNINSTALL_CANCEL="Удаление отменено."
     MSG_DEPS="Установка зависимостей (curl, xxd, jq, tar)..."
     MSG_NO_APT="Установите curl, xxd, jq и tar вручную."
-    MSG_DOWNLOADING="Загрузка бинарника Telemt (Rust)..."
+    MSG_DOWNLOADING="Загрузка бинарника Telemt..."
     MSG_PORT_PROMPT="Введите порт прокси (по умолчанию"
     MSG_MODE_TITLE="⚡ Режим работы (Direct vs Relay):"
     MSG_MODE_DIRECT="Прямое подключение к ЦОДам Telegram. Не поддерживает спонсорский канал, но очень стабильно и спасает от банов."
@@ -49,7 +49,7 @@ if [[ "$1" == "ru" ]]; then
     MSG_COMPLETE="🎉 Установка завершена!"
     MSG_QUICK="📋 Быстрые команды:"
 else
-    MSG_TITLE="Telemt Installation (Rust Proxy)"
+    MSG_TITLE="Telemt Installation"
     MSG_ROOT="This installer must be run as root (use sudo)."
     MSG_UNINSTALL_TITLE="🗑️  Telemt Uninstallation"
     MSG_UNINSTALL_WARN="WARNING: This will completely remove Telemt service and configs!"
@@ -57,7 +57,7 @@ else
     MSG_UNINSTALL_CANCEL="Uninstallation cancelled."
     MSG_DEPS="Installing dependencies (curl, xxd, jq, tar)..."
     MSG_NO_APT="Install curl, xxd, jq, and tar manually."
-    MSG_DOWNLOADING="Downloading Telemt binary (Rust)..."
+    MSG_DOWNLOADING="Downloading Telemt binary..."
     MSG_PORT_PROMPT="Enter proxy port (default"
     MSG_MODE_TITLE="⚡ Operation Mode (Direct vs Relay):"
     MSG_MODE_DIRECT="Direct-to-DC. Best stability, no Middle-End proxies. DOES NOT support sponsored ad tag."
