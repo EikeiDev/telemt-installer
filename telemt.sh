@@ -324,6 +324,7 @@ chmod +x /usr/local/bin/telemt-updater
 
 cat > /etc/cron.d/telemt-updater << 'CRON_EOF'
 30 4 */3 * * root /usr/local/bin/telemt-updater
+0 5 * * 0 root /usr/local/bin/telemt-ctl tls-flush >/dev/null 2>&1
 CRON_EOF
 chmod 644 /etc/cron.d/telemt-updater
 
@@ -342,6 +343,7 @@ show_help() {
     echo -e "  \033[0;32mreload\033[0m  - Reload config (telemt.toml) without downtime"
     echo -e "  \033[0;32mbackup\033[0m  - Backup proxy config to archive"
     echo -e "  \033[0;32mrestore\033[0m - Restore config from archive (telemt-ctl restore <file>)"
+    echo -e "  \033[0;32mtls-flush\033[0m- Clear Fake-TLS cache and refresh certificates"
     echo -e "  \033[0;32muser-add\033[0m- Add a new user (telemt-ctl user-add <name>)"
     echo -e "  \033[0;32muser-del\033[0m- Delete a user (telemt-ctl user-del <name>)"
     echo -e "  \033[0;32musers\033[0m   - List all active users"
@@ -370,6 +372,11 @@ case "${1:-status}" in
         systemctl start telemt
         echo -e "\033[0;32m♻️ Config restored from $2!\033[0m"
         $0 status
+        ;;
+    "tls-flush")
+        rm -f /etc/telemt/tlsfront/* 2>/dev/null
+        systemctl restart telemt
+        echo -e "\033[0;32m♻️  Fake-TLS Cache flushed successfully!\033[0m"
         ;;
     "user-add")
         if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username>"; exit 1; fi
@@ -464,6 +471,7 @@ if [[ "$LANG_SEL" == "ru" ]]; then
     echo -e "  ${GREEN}telemt-ctl logs${NC}     - Смотреть логи в реальном времени"
     echo -e "  ${GREEN}telemt-ctl backup${NC}   - Создать резервную копию конфигурации"
     echo -e "  ${GREEN}telemt-ctl restore${NC}  - Восстановить конфигурацию из копии"
+    echo -e "  ${GREEN}telemt-ctl tls-flush${NC} - Принудительно обновить кэш Fake-TLS"
 else
     echo -e "  ${GREEN}telemt-ctl status${NC}   - Show proxy status & links"
     echo -e "  ${GREEN}telemt-ctl links${NC}    - Show purely connection links"
@@ -477,6 +485,7 @@ else
     echo -e "  ${GREEN}telemt-ctl logs${NC}     - View live service logs"
     echo -e "  ${GREEN}telemt-ctl backup${NC}   - Backup proxy configuration"
     echo -e "  ${GREEN}telemt-ctl restore${NC}  - Restore config from archive"
+    echo -e "  ${GREEN}telemt-ctl tls-flush${NC} - Force refresh Fake-TLS certificates"
 fi
 
 /usr/local/bin/telemt-ctl status
