@@ -3,10 +3,6 @@
 # Telemt Installation Script
 # Interactive installer for the Rust-based Telemt project (telemt/telemt)
 # Replaces older MTProxy scripts with a modern implementation.
-#
-# Usage:
-#   ./telemt.sh               - Install Telemt
-#   ./telemt.sh uninstall     - Remove Telemt completely
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -352,6 +348,5 @@ echo -e "${CYAN}$MSG_QUICK${NC}"
 echo -e "${GREEN}telemt-ctl status${NC}"
 echo -e "${GREEN}telemt-ctl links${NC}"
 echo -e "${GREEN}telemt-ctl update${NC}"
-echo -e "${GREEN}telemt.sh uninstall${NC}"
 
 /usr/local/bin/telemt-ctl status
