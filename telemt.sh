@@ -32,7 +32,7 @@ if [[ "$1" == "ru" ]]; then
     MSG_DEPS="Установка зависимостей (curl, xxd, jq, tar)..."
     MSG_NO_APT="Установите curl, xxd, jq и tar вручную."
     MSG_DOWNLOADING="Загрузка бинарника Telemt..."
-    MSG_PORT_PROMPT="Введите порт прокси (по умолчанию"
+    MSG_PORT_PROMPT="Введите порты через запятую (например: 443,8443) [по умолчанию"
     MSG_MODE_TITLE="⚡ Режим работы (Direct vs Relay):"
     MSG_MODE_DIRECT="Прямое подключение к ЦОДам Telegram. Не поддерживает спонсорский канал, но очень стабильно и спасает от банов."
     MSG_MODE_RELAY="Через старые прокси-посредники. Менее стабильно, но ПОДДЕРЖИВАЕТ спонсорский канал (Ad Tag)."
@@ -58,7 +58,7 @@ else
     MSG_DEPS="Installing dependencies (curl, xxd, jq, tar)..."
     MSG_NO_APT="Install curl, xxd, jq, and tar manually."
     MSG_DOWNLOADING="Downloading Telemt binary..."
-    MSG_PORT_PROMPT="Enter proxy port (default"
+    MSG_PORT_PROMPT="Enter comma-separated ports (e.g. 443,8443) [default"
     MSG_MODE_TITLE="⚡ Operation Mode (Direct vs Relay):"
     MSG_MODE_DIRECT="Direct-to-DC. Best stability, no Middle-End proxies. DOES NOT support sponsored ad tag."
     MSG_MODE_RELAY="Middle-End Relay. Slower and easily blocked, but REQUIRES it for sponsored ad tag."
@@ -95,14 +95,18 @@ if [[ "$1" == "uninstall" ]]; then
     fi
     # Cleanup Firewall
     if [[ -f "/etc/telemt/telemt.toml" ]]; then
-        PORT_TO_CLEAN=$(awk -F'=' '/^port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ')
-        if [[ -n "$PORT_TO_CLEAN" ]]; then
-            if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
-                ufw delete allow $PORT_TO_CLEAN/tcp >/dev/null 2>&1
-            elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
-                firewall-cmd --remove-port=$PORT_TO_CLEAN/tcp --permanent >/dev/null 2>&1
-                firewall-cmd --reload >/dev/null 2>&1
+        PORTS_TO_CLEAN=$(awk -F'=' '/^[ \t]*port/ {print $2}' /etc/telemt/telemt.toml | tr -d ' ' | sort -u)
+        for p in $PORTS_TO_CLEAN; do
+            if [[ -n "$p" ]]; then
+                if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+                    ufw delete allow $p/tcp >/dev/null 2>&1
+                elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+                    firewall-cmd --remove-port=$p/tcp --permanent >/dev/null 2>&1
+                fi
             fi
+        done
+        if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+            firewall-cmd --reload >/dev/null 2>&1
         fi
     fi
     systemctl stop telemt 2>/dev/null
@@ -120,8 +124,10 @@ if [[ "$1" == "uninstall" ]]; then
 fi
 
 # Ask questions
-read -p "$MSG_PORT_PROMPT: 443): " USER_PORT
+read -p "$MSG_PORT_PROMPT 443]: " USER_PORT
+USER_PORT=$(echo "$USER_PORT" | tr -d '[:space:]')
 PORT=${USER_PORT:-443}
+FIRST_PORT=$(echo "$PORT" | cut -d',' -f1)
 
 echo -e "\n${YELLOW}$MSG_MODE_TITLE${NC}"
 echo -e "1. ${GREEN}Direct Mode${NC} - $MSG_MODE_DIRECT"
@@ -236,7 +242,7 @@ secure = false
 tls = true
 
 [server]
-port = $PORT
+port = $FIRST_PORT
 proxy_protocol = $USE_PROXY_PROTO
 metrics_listen = "127.0.0.1:9090"
 
@@ -244,9 +250,19 @@ metrics_listen = "127.0.0.1:9090"
 enabled = true
 listen = "127.0.0.1:9091"
 whitelist = ["127.0.0.1/32"]
+EOL
+
+IFS=',' read -ra PORT_ARRAY <<< "$PORT"
+for p in "${PORT_ARRAY[@]}"; do
+cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [[server.listeners]]
 ip = "$LISTEN_IP"
+port = $p
+EOL
+done
+
+cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [censorship]
 tls_domain = "$TLS_DOMAIN"
@@ -443,11 +459,17 @@ fi
 
 # Firewall Auto-Configuration
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
-    echo -e "${YELLOW}Configuring UFW firewall for port $PORT...${NC}"
-    ufw allow $PORT/tcp >/dev/null 2>&1
+    IFS=',' read -ra PORT_ARRAY <<< "$PORT"
+    for p in "${PORT_ARRAY[@]}"; do
+        echo -e "${YELLOW}Configuring UFW firewall for port $p...${NC}"
+        ufw allow $p/tcp >/dev/null 2>&1
+    done
 elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
-    echo -e "${YELLOW}Configuring Firewalld for port $PORT...${NC}"
-    firewall-cmd --add-port=$PORT/tcp --permanent >/dev/null 2>&1
+    IFS=',' read -ra PORT_ARRAY <<< "$PORT"
+    for p in "${PORT_ARRAY[@]}"; do
+        echo -e "${YELLOW}Configuring Firewalld for port $p...${NC}"
+        firewall-cmd --add-port=$p/tcp --permanent >/dev/null 2>&1
+    done
     firewall-cmd --reload >/dev/null 2>&1
 fi
 
