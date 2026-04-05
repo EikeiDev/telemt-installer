@@ -42,6 +42,8 @@ if [[ "$1" == "ru" ]]; then
     MSG_MODE_RELAY="Через старые прокси-посредники. Менее стабильно, но ПОДДЕРЖИВАЕТ спонсорский канал (Ad Tag)."
     MSG_MODE_PROMPT="Выберите режим (1 - Direct, 2 - Relay) [по умолчанию 1]: "
     MSG_TAG_PROMPT="Введите ваш Ad Tag от @MTProxybot (оставьте пустым для пропуска): "
+    MSG_DOMAIN_PROMPT="Введите публичный домен или IP для ссылок (пусто - авто IP): "
+    MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
     MSG_SVC_CREATE="Создание systemd сервиса..."
     MSG_UTIL_CREATE="Создание утилиты управления telemt-ctl..."
@@ -63,6 +65,8 @@ else
     MSG_MODE_RELAY="Middle-End Relay. Slower and easily blocked, but REQUIRES it for sponsored ad tag."
     MSG_MODE_PROMPT="Choose mode (1- Direct, 2 - Relay) [default: 1]: "
     MSG_TAG_PROMPT="Enter your Ad Tag from @MTProxybot (leave empty to skip): "
+    MSG_DOMAIN_PROMPT="Enter public domain or IP for connection links (empty for auto IP): "
+    MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
     MSG_SVC_CREATE="Creating systemd service..."
     MSG_UTIL_CREATE="Creating management utility telemt-ctl..."
@@ -123,6 +127,15 @@ RANDOM_DOMAIN=${TLS_DOMAINS[$RANDOM % ${#TLS_DOMAINS[@]}]}
 read -p "$MSG_TLS_PROMPT: $RANDOM_DOMAIN): " USER_TLS
 TLS_DOMAIN=${USER_TLS:-$RANDOM_DOMAIN}
 
+echo -e "\n${YELLOW}🌐 Public Address (Domain/IP)${NC}"
+read -p "$MSG_DOMAIN_PROMPT" USER_CUSTOM_DOMAIN
+USER_CUSTOM_DOMAIN=$(echo "$USER_CUSTOM_DOMAIN" | tr -d '[:space:]')
+
+echo -e "\n${YELLOW}👤 User Settings${NC}"
+read -p "$MSG_USERNAME_PROMPT" USER_NAME_INPUT
+USER_NAME_INPUT=$(echo "$USER_NAME_INPUT" | tr -d '[:space:]')
+PROXY_USERNAME=${USER_NAME_INPUT:-default_user}
+
 echo -e "\n${YELLOW}$MSG_DEPS${NC}"
 if command -v apt >/dev/null 2>&1; then
     apt update -qq
@@ -133,6 +146,11 @@ CONFIG_DIR="/etc/telemt"
 BIN_FILE="/usr/local/bin/telemt"
 
 mkdir -p "$CONFIG_DIR"
+if [[ -n "$USER_CUSTOM_DOMAIN" ]]; then
+    echo "$USER_CUSTOM_DOMAIN" > "$CONFIG_DIR/custom_domain"
+else
+    rm -f "$CONFIG_DIR/custom_domain"
+fi
 systemctl stop telemt 2>/dev/null
 
 echo -e "\n${YELLOW}$MSG_DOWNLOADING${NC}"
@@ -202,7 +220,7 @@ mask = true
 tls_emulation = true
 
 [access.users]
-default_user = "$USER_SECRET"
+$PROXY_USERNAME = "$USER_SECRET"
 EOL
 
 if ! id "telemt" >/dev/null 2>&1; then
@@ -302,7 +320,12 @@ case "${1:-status}" in
     "logs")    journalctl -u telemt -f ;;
     "links")
         echo -e "\033[1;33m🔗 Connection Links via REST API:\033[0m"
-        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links.tls[0] // "NO TLS LINK FOR THIS USER")\n"' 2>/dev/null || echo "API is not responding. Is telemt running?"
+        if [[ -f "/etc/telemt/custom_domain" ]]; then
+            CONNECT_HOST=$(cat /etc/telemt/custom_domain)
+        else
+            CONNECT_HOST=$(curl -s --max-time 3 http://ifconfig.me 2>/dev/null || curl -s --max-time 3 http://ipinfo.io/ip 2>/dev/null || echo "YOUR_SERVER_IP")
+        fi
+        curl -s http://127.0.0.1:9091/v1/users | jq -r '.data[] | "User: \(.username)\n\(.links.tls[0] // "NO TLS LINK FOR THIS USER")\n"' 2>/dev/null | sed -E "s/server=[a-zA-Z0-9\.-]+/server=$CONNECT_HOST/g" || echo "API is not responding. Is telemt running?"
         ;;
     "stats")
         curl -s http://127.0.0.1:9090/metrics 2>/dev/null || echo "Metrics API not ready."
