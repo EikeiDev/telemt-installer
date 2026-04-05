@@ -44,6 +44,7 @@ if [[ "$1" == "ru" ]]; then
     MSG_SECURE_TITLE="🔒 Выберите метод маскировки от DPI:"
     MSG_SECURE_EE="Fake-TLS (По умолчанию). Маскировка под HTTPS, секрет 'ee'. Обходит 90% блокировок."
     MSG_SECURE_DD="Secure Padding. Рандомный паддинг, секрет 'dd'. Выбирайте, если провайдер фильтрует Fake-TLS."
+    MSG_SECURE_ALL="Hybrid (Все сразу). Ссылки TLS, Secure и Classic одновременно."
     MSG_PROXY_PROTO_PROMPT="Вы планируете прятать прокси за Nginx/HAProxy? (Включить PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
@@ -73,6 +74,7 @@ else
     MSG_SECURE_TITLE="🔒 Select Protection Mode (DPI Bypass):"
     MSG_SECURE_EE="Fake-TLS (Recommended). Mimics HTTPS, 'ee' secret. Bypasses most DPI."
     MSG_SECURE_DD="Secure Padding. Uses random byte padding, 'dd' secret. Use if Fake-TLS is blocked."
+    MSG_SECURE_ALL="Hybrid (All Modes). Activates TLS, Secure, and Classic variants simultaneously."
     MSG_PROXY_PROTO_PROMPT="Will you hide proxy behind Nginx/HAProxy? (Enable PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
@@ -162,13 +164,20 @@ USER_CUSTOM_DOMAIN=$(echo "$USER_CUSTOM_DOMAIN" | tr -d '[:space:]')
 echo -e "\n${YELLOW}$MSG_SECURE_TITLE${NC}"
 echo -e "1. ${GREEN}Fake-TLS${NC} - $MSG_SECURE_EE"
 echo -e "2. ${GREEN}Secure Padding${NC} - $MSG_SECURE_DD"
-read -p "1/2 [1]: " SECURE_MODE_CHOICE
+echo -e "3. ${GREEN}Hybrid Mode${NC} - $MSG_SECURE_ALL"
+read -p "1/2/3 [1]: " SECURE_MODE_CHOICE
 if [[ "$SECURE_MODE_CHOICE" == "2" ]]; then
     MODE_TLS="false"
     MODE_SECURE="true"
+    MODE_CLASSIC="false"
+elif [[ "$SECURE_MODE_CHOICE" == "3" ]]; then
+    MODE_TLS="true"
+    MODE_SECURE="true"
+    MODE_CLASSIC="true"
 else
     MODE_TLS="true"
     MODE_SECURE="false"
+    MODE_CLASSIC="false"
 fi
 
 echo -e "\n${YELLOW}🛡️  Web-Server Integration${NC}"
@@ -249,7 +258,7 @@ fi
 cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [general.modes]
-classic = false
+classic = $MODE_CLASSIC
 secure = $MODE_SECURE
 tls = $MODE_TLS
 
