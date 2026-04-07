@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Telemt Installation Script
-# Interactive installer for the Rust-based Telemt project (telemt/telemt)
-# Replaces older MTProxy scripts with a modern implementation.
-
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -48,6 +44,7 @@ if [[ "$1" == "ru" ]]; then
     MSG_PROXY_PROTO_PROMPT="Вы планируете прятать прокси за Nginx/HAProxy? (Включить PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Введите имя для первого пользователя (по умолчанию 'default_user'): "
     MSG_TLS_PROMPT="Введите TLS-домен для глубокой маскировки Fake-TLS (по умолчанию"
+    MSG_UPSTREAM_PROMPT="Хотите пустить трафик через внешний SOCKS5/SS прокси? Введите адрес (socks5://... или ss://...) или Enter для пропуска: "
     MSG_SVC_CREATE="Создание systemd сервиса..."
     MSG_UTIL_CREATE="Создание утилиты управления telemt-ctl..."
     MSG_COMPLETE="🎉 Установка завершена!"
@@ -78,6 +75,7 @@ else
     MSG_PROXY_PROTO_PROMPT="Will you hide proxy behind Nginx/HAProxy? (Enable PROXY Protocol) [y/N]: "
     MSG_USERNAME_PROMPT="Enter username for the primary user (default 'default_user'): "
     MSG_TLS_PROMPT="Enter TLS Domain for deep Fake-TLS TCP Splicing (default"
+    MSG_UPSTREAM_PROMPT="Route traffic through external proxy? Enter SOCKS5/SS URI (or press Enter to skip): "
     MSG_SVC_CREATE="Creating systemd service..."
     MSG_UTIL_CREATE="Creating management utility telemt-ctl..."
     MSG_COMPLETE="🎉 Installation Complete!"
@@ -195,6 +193,10 @@ read -p "$MSG_USERNAME_PROMPT" USER_NAME_INPUT
 USER_NAME_INPUT=$(echo "$USER_NAME_INPUT" | tr -d '[:space:]')
 PROXY_USERNAME=${USER_NAME_INPUT:-default_user}
 
+echo -e "\n${YELLOW}🛣️  Upstream Routing${NC}"
+read -p "$MSG_UPSTREAM_PROMPT" USER_UPSTREAM
+USER_UPSTREAM=$(echo "$USER_UPSTREAM" | tr -d '[:space:]')
+
 echo -e "\n${YELLOW}$MSG_DEPS${NC}"
 if command -v apt >/dev/null 2>&1; then
     apt update -qq
@@ -277,13 +279,56 @@ ip = "$LISTEN_IP"
 
 [censorship]
 tls_domain = "$TLS_DOMAIN"
-mask = true
+mask_host = "$TLS_DOMAIN"
+mask_port = 443
+unknown_sni_action = "mask"
 tls_emulation = true
 tls_front_dir = "$CONFIG_DIR/tlsfront"
 
 [access.users]
 $PROXY_USERNAME = "$USER_SECRET"
 EOL
+
+if [[ -n "$USER_UPSTREAM" ]]; then
+    if [[ "$USER_UPSTREAM" == socks5://* ]]; then
+        SOCKS_ADDR=${USER_UPSTREAM#socks5://}
+        if [[ "$SOCKS_ADDR" == *@* ]]; then
+            SOCKS_AUTH=${SOCKS_ADDR%@*}
+            SOCKS_HOST=${SOCKS_ADDR#*@}
+            SOCKS_USER=${SOCKS_AUTH%:*}
+            SOCKS_PASS=${SOCKS_AUTH#*:}
+            cat >> "$CONFIG_DIR/telemt.toml" << UPEOL
+
+[[upstreams]]
+type = "socks5"
+address = "$SOCKS_HOST"
+username = "$SOCKS_USER"
+password = "$SOCKS_PASS"
+weight = 1
+enabled = true
+UPEOL
+        else
+            cat >> "$CONFIG_DIR/telemt.toml" << UPEOL
+
+[[upstreams]]
+type = "socks5"
+address = "$SOCKS_ADDR"
+weight = 1
+enabled = true
+UPEOL
+        fi
+    elif [[ "$USER_UPSTREAM" == ss://* ]]; then
+        cat >> "$CONFIG_DIR/telemt.toml" << UPEOL
+
+[[upstreams]]
+type = "shadowsocks"
+url = "$USER_UPSTREAM"
+weight = 1
+enabled = true
+UPEOL
+        sed -i 's/use_middle_proxy = true/use_middle_proxy = false/' "$CONFIG_DIR/telemt.toml"
+    fi
+fi
 
 if ! id "telemt" >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin telemt
@@ -406,13 +451,30 @@ case "${1:-status}" in
         echo -e "\033[0;32m♻️  Fake-TLS Cache flushed successfully!\033[0m"
         ;;
     "user-add")
-        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username>"; exit 1; fi
+        if [[ -z "$2" ]]; then echo "Usage: telemt-ctl user-add <username> [max_ips] [ad_tag]"; exit 1; fi
         NEW_USER="$2"
+        MAX_IPS="$3"
+        AD_TAG="$4"
         if grep -q "^$NEW_USER =" /etc/telemt/telemt.toml; then
             echo -e "\033[0;31mUser $NEW_USER already exists!\033[0m"; exit 1
         fi
         NEW_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
         sed -i "/^\[access.users\]/a $NEW_USER = \"$NEW_SECRET\"" /etc/telemt/telemt.toml
+        
+        if [[ -n "$MAX_IPS" ]]; then
+            if ! grep -q "^\[access.user_max_unique_ips\]" /etc/telemt/telemt.toml; then
+                echo -e "\n[access.user_max_unique_ips]" >> /etc/telemt/telemt.toml
+            fi
+            sed -i "/^\[access.user_max_unique_ips\]/a $NEW_USER = $MAX_IPS" /etc/telemt/telemt.toml
+        fi
+        
+        if [[ -n "$AD_TAG" ]]; then
+            if ! grep -q "^\[access.user_ad_tags\]" /etc/telemt/telemt.toml; then
+                echo -e "\n[access.user_ad_tags]" >> /etc/telemt/telemt.toml
+            fi
+            sed -i "/^\[access.user_ad_tags\]/a $NEW_USER = \"$AD_TAG\"" /etc/telemt/telemt.toml
+        fi
+
         systemctl reload telemt
         echo -e "\033[0;32m✅ User $NEW_USER added!\033[0m"
         $0 links
@@ -469,13 +531,17 @@ if ! grep -q "net.ipv4.tcp_congestion_control" /etc/sysctl.conf 2>/dev/null; the
 fi
 
 # Firewall Auto-Configuration
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
-    echo -e "${YELLOW}Configuring UFW firewall for port $PORT...${NC}"
-    ufw allow $PORT/tcp >/dev/null 2>&1
-elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
-    echo -e "${YELLOW}Configuring Firewalld for port $PORT...${NC}"
-    firewall-cmd --add-port=$PORT/tcp --permanent >/dev/null 2>&1
-    firewall-cmd --reload >/dev/null 2>&1
+if [[ "$USE_PROXY_PROTO" == "false" ]]; then
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw active; then
+        echo -e "${YELLOW}Configuring UFW firewall for port $PORT...${NC}"
+        ufw allow $PORT/tcp >/dev/null 2>&1
+    elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
+        echo -e "${YELLOW}Configuring Firewalld for port $PORT...${NC}"
+        firewall-cmd --add-port=$PORT/tcp --permanent >/dev/null 2>&1
+        firewall-cmd --reload >/dev/null 2>&1
+    fi
+else
+    echo -e "${YELLOW}Skipping Firewall configuration (PROXY Protocol is enabled on loopback).${NC}"
 fi
 
 systemctl daemon-reload
