@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Telemt Installation Script
+# Interactive installer for the Rust-based Telemt project (telemt/telemt)
+# Replaces older MTProxy scripts with a modern implementation.
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -352,8 +356,8 @@ ExecReload=/bin/kill -SIGHUP $MAINPID
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
