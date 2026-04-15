@@ -243,13 +243,16 @@ fi
 tar -xf "/tmp/$TAR_NAME" -C /tmp/
 mv "/tmp/telemt" "$BIN_FILE"
 chmod +x "$BIN_FILE"
+if command -v setcap >/dev/null 2>&1; then
+    setcap cap_net_bind_service,cap_net_admin=+ep "$BIN_FILE" 2>/dev/null || true
+fi
 echo "$LATEST_URL" > "$CONFIG_DIR/installed_url"
 rm -f "/tmp/$TAR_NAME"
 
 USER_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
-TELE_PROXY_MODE="false"
-[[ "$USE_DIRECT" == "false" ]] && TELE_PROXY_MODE="true"
+TELE_PROXY_MODE="true"
+[[ "$USE_DIRECT" == "true" ]] && TELE_PROXY_MODE="false"
 
 cat > "$CONFIG_DIR/telemt.toml" << EOL
 [general]
@@ -268,26 +271,46 @@ classic = $MODE_CLASSIC
 secure = $MODE_SECURE
 tls = $MODE_TLS
 
+[general.links]
+show = "*"
+EOL
+
+if [[ -n "$USER_CUSTOM_DOMAIN" ]]; then
+    echo "public_host = \"$USER_CUSTOM_DOMAIN\"" >> "$CONFIG_DIR/telemt.toml"
+fi
+
+cat >> "$CONFIG_DIR/telemt.toml" << EOL
+
 [server]
 port = $PORT
-proxy_protocol = $USE_PROXY_PROTO
-metrics_listen = "127.0.0.1:9090"
+EOL
+
+# Only add proxy_protocol if explicitly enabled
+if [[ "$USE_PROXY_PROTO" == "true" ]]; then
+    echo "proxy_protocol = true" >> "$CONFIG_DIR/telemt.toml"
+fi
+
+cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [server.api]
 enabled = true
 listen = "127.0.0.1:9091"
 whitelist = ["127.0.0.1/32"]
+EOL
+
+# Only add explicit listener if using proxy_protocol (loopback)
+if [[ "$USE_PROXY_PROTO" == "true" ]]; then
+    cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [[server.listeners]]
 ip = "$LISTEN_IP"
+EOL
+fi
+
+cat >> "$CONFIG_DIR/telemt.toml" << EOL
 
 [censorship]
 tls_domain = "$TLS_DOMAIN"
-mask_host = "$TLS_DOMAIN"
-mask_port = 443
-unknown_sni_action = "mask"
-tls_emulation = true
-tls_front_dir = "$CONFIG_DIR/tlsfront"
 
 [access.users]
 $PROXY_USERNAME = "$USER_SECRET"
@@ -341,9 +364,13 @@ chown -R telemt:telemt "$CONFIG_DIR"
 chmod 640 "$CONFIG_DIR/telemt.toml"
 
 echo -e "${YELLOW}$MSG_SVC_CREATE${NC}"
-cat > /etc/systemd/system/telemt.service << 'EOF'
+WORK_DIR="/opt/telemt"
+mkdir -p "$WORK_DIR"
+chown telemt:telemt "$WORK_DIR"
+
+cat > /etc/systemd/system/telemt.service << SVCEOF
 [Unit]
-Description=Telemt Proxy Server
+Description=Telemt
 After=network-online.target
 Wants=network-online.target
 
@@ -351,21 +378,17 @@ Wants=network-online.target
 Type=simple
 User=telemt
 Group=telemt
+WorkingDirectory=$WORK_DIR
 ExecStart=/usr/local/bin/telemt /etc/telemt/telemt.toml
-ExecReload=/bin/kill -SIGHUP $MAINPID
 Restart=on-failure
 RestartSec=5
-LimitNOFILE=1048576
+LimitNOFILE=65536
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/etc/telemt
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
 cat > /usr/local/bin/telemt-updater << 'UPDATER_EOF'
 #!/bin/bash
@@ -390,6 +413,7 @@ if [[ "$LATEST_URL" != "$CURRENT_URL" ]]; then
         systemctl stop telemt
         mv "/tmp/telemt" "/usr/local/bin/telemt"
         chmod +x "/usr/local/bin/telemt"
+        setcap cap_net_bind_service,cap_net_admin=+ep "/usr/local/bin/telemt" 2>/dev/null || true
         systemctl start telemt
         rm -f "/tmp/$TAR_NAME"
         echo "$LATEST_URL" > "/etc/telemt/installed_url"
